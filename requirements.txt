@@ -1,0 +1,40 @@
+# SHAR Project Requirements
+# Install: pip install -r requirements.txt
+
+
+# Install torch separately first:
+# pip install torch==2.5.1+cu124 torchvision==0.20.1+cu124 torchaudio==2.5.1+cu124 --index-url https://download.pytorch.org/whl/cu124
+
+# Core Deep Learning
+torch==2.5.1+cu124
+torchvision==0.20.1+cu124
+torchaudio==2.5.1+cu124
+
+# Video Processing
+opencv-python==4.9.0.80
+imageio==2.34.0
+imageio-ffmpeg==0.4.9
+
+# Data Science
+numpy==1.26.4
+pandas==2.2.1
+scikit-learn
+matplotlib==3.8.4
+seaborn==0.13.2
+Pillow==10.3.0
+
+# Explainability
+shap==0.45.0
+grad-cam==1.4.8
+
+# Web App
+streamlit==1.33.0
+plotly==5.20.0
+watchdog==4.0.0
+
+# Utilities
+tqdm==4.66.2
+PyYAML==6.0.1
+python-dotenv==1.0.1
+ipykernel==6.29.4
+nbformat==5.10.4
