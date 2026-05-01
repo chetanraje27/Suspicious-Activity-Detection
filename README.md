@@ -203,19 +203,8 @@ Output: (B, 21) class logits
 | Storage | 5GB | - |
 | OS | Windows/Linux | Windows 11 |
 
----
 
-## 📚 References
 
-1. Sultani, W., Chen, C., & Shah, M. (2018). Real-world anomaly detection in surveillance videos. *CVPR 2018*.
-2. Donahue, J. et al. (2015). Long-term recurrent convolutional networks. *CVPR 2015*.
-3. Selvaraju, R. R. et al. (2017). Grad-CAM: Visual explanations from deep networks. *ICCV 2017*.
-4. He, K. et al. (2016). Deep residual learning for image recognition. *CVPR 2016*.
-
----
-
-## 👨‍💻 Author
-**Abhinav** — Deep Learning Project | Suspicious Activity Detection
 
 ---
 *GPU-accelerated on NVIDIA RTX 3050 6GB | PyTorch 2.2 | CUDA 12.x*

@@ -4,6 +4,7 @@ Streamlit Web Application
 Run: streamlit run webapp/app.py
 """
 import streamlit as st
+import streamlit.components.v1 as components
 import sys, os, cv2, time, tempfile
 import torch
 import numpy as np
@@ -44,13 +45,18 @@ st.markdown("""
         text-align: center;
         animation: pulse 2s infinite;
     }
-    .alert-green {
-        background: linear-gradient(135deg, #003d10, #0a5c1a);
-        border: 2px solid #2ecc71;
-        border-radius: 12px;
-        padding: 20px;
-        text-align: center;
+    .detection-log {
+        background: #161b22;
+        border-radius: 8px;
+        padding: 10px;
+        height: 400px;
+        overflow-y: auto;
+        font-family: 'Courier New', Courier, monospace;
+        border-left: 4px solid #e74c3c;
     }
+    .log-entry { margin-bottom: 5px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+    .log-time { color: #8b949e; font-size: 0.8em; }
+    .log-msg { color: #e74c3c; font-weight: bold; }
     @keyframes pulse {
         0%   { box-shadow: 0 0 0 0 rgba(231,76,60,0.7); }
         70%  { box-shadow: 0 0 0 10px rgba(231,76,60,0); }
@@ -102,8 +108,70 @@ def load_model(model_name):
     except Exception as e:
         return None, None, False
 
+def trigger_alert_audio(action_name):
+    """Triggers a browser beep and text-to-speech alert."""
+    components.html(
+        f"""
+        <script>
+            // Clear any previous speech immediately
+            window.speechSynthesis.cancel();
+            if(window.parent) window.parent.speechSynthesis.cancel();
+
+            // 1. Play Alarm Sound (Beep)
+            function playBeep() {{
+                const context = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = context.createOscillator();
+                const gain = context.createGain();
+                osc.connect(gain);
+                gain.connect(context.destination);
+                osc.type = "sawtooth"; 
+                osc.frequency.value = 523.25; 
+                gain.gain.value = 0.5;
+                osc.start();
+                setTimeout(() => {{ osc.stop(); }}, 400);
+            }}
+            playBeep();
+
+            // 2. Text-to-Speech
+            setTimeout(() => {{
+                const msg = new SpeechSynthesisUtterance();
+                msg.text = "Alert! Suspicious: {action_name}.";
+                msg.rate = 1.1; 
+                window.speechSynthesis.speak(msg);
+            }}, 500);
+        </script>
+        """,
+        height=0,
+    )
+
+def stop_audio():
+    """Stops all ongoing browser speech alerts aggressively."""
+    components.html(
+        """
+        <script>
+            // Aggressively cancel all speech
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.pause();
+                window.speechSynthesis.cancel();
+                
+                // Double check for window.parent if in Streamlit iframe
+                if (window.parent && window.parent.speechSynthesis) {
+                    window.parent.speechSynthesis.pause();
+                    window.parent.speechSynthesis.cancel();
+                }
+            }
+        </script>
+        """,
+        height=0,
+    )
+
 # ── Main UI ──────────────────────────────────────────────
 st.title("🔍 Suspicious Human Activity Recognition")
+
+# 🔕 Master Muzzle: Strictly stop any background speech on rerun if not supposed to be running
+if not st.session_state.get("is_running", False):
+    components.html("<script>window.speechSynthesis.cancel(); if(window.parent) window.parent.speechSynthesis.cancel();</script>", height=0)
+
 st.caption("Deep Learning-powered real-time suspicious activity detection | 21-class classification")
 
 # Status bar
@@ -136,32 +204,62 @@ with tab1:
         tfile.close()
         vid_path = tfile.name
 
-        col_vid, col_res = st.columns([1.2, 1])
+        col_vid, col_res = st.columns([1.5, 1])
 
         with col_vid:
-            st.video(vid_path)
-            st.caption(f"📁 {uploaded.name}")
+            monitor_placeholder = st.empty()
+            st.caption("🔴 LIVE MONITOR SIMULATION")
 
         with col_res:
-            if st.button("🚀 Analyze Video", type="primary", use_container_width=True):
-                with st.spinner("Extracting frames and running inference..."):
-                    progress = st.progress(0)
+            alert_placeholder = st.empty()
+            audio_placeholder = st.empty()
+            st.subheader("📋 Activity Log")
+            log_placeholder = st.empty()
+            log_entries = []
 
-                    # Extract frames
-                    progress.progress(20, "Extracting frames...")
-                    frames = extract_frames(vid_path, num_frames=num_frames)
+            btn_col1, btn_col2 = st.columns(2)
+            start_btn = btn_col1.button("🚀 Start Analysis", type="primary", use_container_width=True)
+            stop_btn = btn_col2.button("🛑 Stop", type="secondary", use_container_width=True)
 
-                    if frames is None:
-                        st.error("❌ Could not read video file.")
-                    else:
-                        # Preprocess
-                        progress.progress(50, "Preprocessing...")
-                        transform = get_transforms("val")
-                        tensor = torch.stack([transform(f) for f in frames]).unsqueeze(0).to(device)
+            if stop_btn:
+                st.session_state.is_running = False
+                audio_placeholder.empty()
+                stop_audio()
+                st.rerun()
 
+            if start_btn:
+                st.session_state.is_running = True
+                cap = cv2.VideoCapture(vid_path)
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                if fps == 0: fps = 30
+                
+                window_frames = []
+                frame_count = 0
+                
+                # Model Setup
+                model.eval()
+                transform = get_transforms("val")
+                
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret: break
+                    
+                    frame_count += 1
+                    timestamp_sec = frame_count / fps
+                    timestamp_str = time.strftime('%M:%S', time.gmtime(timestamp_sec))
+                    
+                    # Display Frame
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    monitor_placeholder.image(frame_rgb, use_container_width=True)
+                    
+                    # Buffer for inference
+                    window_frames.append(frame_rgb)
+                    
+                    if len(window_frames) == num_frames:
+                        # Prepare tensor
+                        tensor = torch.stack([transform(f) for f in window_frames]).unsqueeze(0).to(device)
+                        
                         # Inference
-                        progress.progress(75, "Running model inference...")
-                        model.eval()
                         with torch.no_grad():
                             try:
                                 from torch.cuda.amp import autocast
@@ -169,72 +267,47 @@ with tab1:
                                     logits = model(tensor)
                             except:
                                 logits = model(tensor)
-
+                        
                         probs = torch.softmax(logits, dim=1)[0].cpu().numpy()
                         pred_idx = probs.argmax()
                         pred_class = CLASS_NAMES[pred_idx]
                         confidence = float(probs[pred_idx])
-                        is_suspicious = pred_class in SUSPICIOUS_CLASSES and confidence >= conf_threshold
-
-                        progress.progress(100, "Done!")
-                        time.sleep(0.3)
-                        progress.empty()
-
-                        # ── Result Display ──────────────────────────
-                        if is_suspicious:
-                            st.markdown(f"""
+                        
+                        # Detection Logic
+                        if pred_class in SUSPICIOUS_CLASSES and confidence >= conf_threshold:
+                            # 🚨 ALERT
+                            alert_placeholder.markdown(f"""
                             <div class="alert-red">
-                                <h2>🚨 SUSPICIOUS ACTIVITY DETECTED</h2>
-                                <h3>{pred_class.upper()}</h3>
-                                <h4>Confidence: {confidence:.1%}</h4>
+                                <h3>🚨 SUSPICIOUS: {pred_class.upper()}</h3>
+                                <p>Confidence: {confidence:.1%} | Time: {timestamp_str}</p>
                             </div>""", unsafe_allow_html=True)
+                            
+                            # 🔊 Ring Sound (Only if still running)
+                            if st.session_state.get("is_running", False):
+                                with audio_placeholder:
+                                    trigger_alert_audio(pred_class)
+                            
+                            # 📝 Log Entry
+                            log_entries.append(f"<div class='log-entry'><span class='log-time'>[{timestamp_str}]</span> <span class='log-msg'>{pred_class} detected!</span></div>")
                         else:
-                            st.markdown(f"""
-                            <div class="alert-green">
-                                <h2>✅ NORMAL ACTIVITY</h2>
-                                <h3>{pred_class}</h3>
-                                <h4>Confidence: {confidence:.1%}</h4>
+                            alert_placeholder.markdown(f"""
+                            <div class="alert-green" style="background: linear-gradient(135deg, #003d10, #0a5c1a); border: 2px solid #2ecc71; border-radius: 12px; padding: 20px; text-align: center;">
+                                <h3>✅ STATUS: SAFE</h3>
+                                <p>Activity: {pred_class} | Conf: {confidence:.1%}</p>
                             </div>""", unsafe_allow_html=True)
+                        
+                        # Update Log UI
+                        log_html = f"<div class='detection-log'>{''.join(log_entries[::-1])}</div>"
+                        log_placeholder.markdown(log_html, unsafe_allow_html=True)
+                        
+                        # Slide window (keep overlap or clear)
+                        window_frames = window_frames[num_frames//2:] # 50% overlap for smoother detection
+                    
+                    # Small sleep to simulate real-time playback speed
+                    time.sleep(0.01) 
 
-                        st.markdown("---")
-
-                        # Top-5 predictions
-                        st.subheader("📊 Top-5 Predictions")
-                        top5_idx = np.argsort(probs)[::-1][:5]
-                        top5_names = [CLASS_NAMES[i] for i in top5_idx]
-                        top5_probs = [probs[i] for i in top5_idx]
-                        colors = ["#e74c3c" if n in SUSPICIOUS_CLASSES else "#2ecc71" for n in top5_names]
-
-                        fig = go.Figure(go.Bar(
-                            x=top5_probs,
-                            y=top5_names,
-                            orientation="h",
-                            marker_color=colors,
-                            text=[f"{p:.1%}" for p in top5_probs],
-                            textposition="outside"
-                        ))
-                        fig.update_layout(
-                            xaxis_title="Probability",
-                            yaxis_autorange="reversed",
-                            template="plotly_dark",
-                            height=280,
-                            margin=dict(l=0, r=50, t=10, b=30)
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-
-                        # Full class probability distribution
-                        with st.expander("📈 Full Class Probability Distribution"):
-                            fig2 = go.Figure(go.Bar(
-                                x=CLASS_NAMES,
-                                y=probs,
-                                marker_color=["#e74c3c" if n in SUSPICIOUS_CLASSES else "#2ecc71" for n in CLASS_NAMES]
-                            ))
-                            fig2.update_layout(
-                                xaxis_tickangle=-45, template="plotly_dark",
-                                height=350, yaxis_title="Probability",
-                                margin=dict(b=100)
-                            )
-                            st.plotly_chart(fig2, use_container_width=True)
+                cap.release()
+                st.success("✅ Analysis Complete")
 
         os.unlink(vid_path)
 
